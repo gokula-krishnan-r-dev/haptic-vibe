@@ -1,0 +1,5 @@
+{
+  "name": "Haptic Studio Pro",
+  "description": "A professional-grade editor for designing haptic feedback patterns (AHAP) synchronized with video, featuring device-less visual simulation.",
+  "requestFramePermissions": []
+}
