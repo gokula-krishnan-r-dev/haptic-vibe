@@ -466,7 +466,7 @@ export default function Home() {
 
             <header className="h-12 border-b border-gray-800 bg-gray-900 flex items-center px-4 justify-between shrink-0 z-30">
                 <div className="flex items-center gap-3">
-                    <div className="w-5 h-5 bg-gradient-to-tr from-cyan-400 to-blue-500 rounded shadow-[0_0_10px_rgba(6,182,212,0.5)]"></div>
+                    <img src="/haptic_logo.png" alt="Haptic Studio Logo" className="w-6 h-6 object-contain drop-shadow-[0_0_8px_rgba(6,182,212,0.5)]" />
                     <h1 className="font-bold text-sm tracking-wide uppercase text-gray-200">Haptic Studio <span className="text-[9px] bg-gray-800 px-1 py-0.5 rounded ml-1 text-cyan-400 border border-cyan-900">PRO</span></h1>
                 </div>
 
