@@ -1,0 +1,29 @@
+{
+    "build": {
+        "beforeDevCommand": "npm run dev",
+        "beforeBuildCommand": "npm run build",
+        "devUrl": "http://localhost:3000",
+        "frontendDist": "../out"
+    },
+    "app": {
+        "windows": [
+            {
+                "title": "Haptic Studio Pro",
+                "width": 1200,
+                "height": 800
+            }
+        ],
+        "security": {
+            "csp": null,
+            "capabilities": [
+                "default"
+            ]
+        }
+    },
+    "bundle": {
+        "active": true,
+        "targets": "all"
+    },
+    "identifier": "com.haptic.studio",
+    "version": "0.0.0"
+}

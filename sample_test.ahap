@@ -1,0 +1,121 @@
+{
+  "Version": 1.0,
+  "Pattern": [
+    {
+      "Event": {
+        "EventType": "HapticTransient",
+        "Time": 0.0,
+        "EventDuration": 0,
+        "EventParameters": [
+          {
+            "ParameterID": "HapticIntensity",
+            "ParameterValue": 0.8
+          },
+          {
+            "ParameterID": "HapticSharpness",
+            "ParameterValue": 0.5
+          }
+        ],
+        "Name": "Tap 1"
+      }
+    },
+    {
+      "Event": {
+        "EventType": "HapticTransient",
+        "Time": 0.5,
+        "EventDuration": 0,
+        "EventParameters": [
+          {
+            "ParameterID": "HapticIntensity",
+            "ParameterValue": 1.0
+          },
+          {
+            "ParameterID": "HapticSharpness",
+            "ParameterValue": 0.7
+          }
+        ],
+        "Name": "Tap 2"
+      }
+    },
+    {
+      "Event": {
+        "EventType": "HapticContinuous",
+        "Time": 1.0,
+        "EventDuration": 0.5,
+        "EventParameters": [
+          {
+            "ParameterID": "HapticIntensity",
+            "ParameterValue": 0.6
+          },
+          {
+            "ParameterID": "HapticSharpness",
+            "ParameterValue": 0.3
+          }
+        ],
+        "Name": "Continuous Buzz"
+      }
+    },
+    {
+      "ParameterCurve": {
+        "ParameterID": "HapticIntensityControl",
+        "Time": 2.0,
+        "ParameterCurveControlPoints": [
+          {
+            "Time": 0.0,
+            "ParameterValue": 0.0
+          },
+          {
+            "Time": 0.25,
+            "ParameterValue": 0.5
+          },
+          {
+            "Time": 0.5,
+            "ParameterValue": 1.0
+          },
+          {
+            "Time": 0.75,
+            "ParameterValue": 0.5
+          },
+          {
+            "Time": 1.0,
+            "ParameterValue": 0.0
+          }
+        ]
+      }
+    },
+    {
+      "ParameterCurve": {
+        "ParameterID": "HapticSharpnessControl",
+        "Time": 2.0,
+        "ParameterCurveControlPoints": [
+          {
+            "Time": 0.0,
+            "ParameterValue": 0.2
+          },
+          {
+            "Time": 1.0,
+            "ParameterValue": 0.8
+          }
+        ]
+      }
+    },
+    {
+      "Event": {
+        "EventType": "HapticTransient",
+        "Time": 3.5,
+        "EventDuration": 0,
+        "EventParameters": [
+          {
+            "ParameterID": "HapticIntensity",
+            "ParameterValue": 0.9
+          },
+          {
+            "ParameterID": "HapticSharpness",
+            "ParameterValue": 0.6
+          }
+        ],
+        "Name": "Final Tap"
+      }
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+   Compiling haptic-studio-pro v0.0.0 (/Users/gokul/Documents/personal/haptic-vibe/src-tauri)
+error[E0255]: the name `__cmd__export_ahap` is defined multiple times
+  --> src/lib.rs:78:14
+   |
+77 | #[command]
+   | ---------- previous definition of the macro `__cmd__export_ahap` here
+78 | pub async fn export_ahap(events: Vec<EditorHapticEvent>, filepath: String) -> Result<(), String> {
+   |              ^^^^^^^^^^^ `__cmd__export_ahap` reimported here
+   |
+   = note: `__cmd__export_ahap` must be defined only once in the macro namespace of this module
+
+warning: unused variable: `global_intensity_points`
+  --> src/lib.rs:81:13
+   |
+81 |     let mut global_intensity_points: Vec<AHAPControlPoint> = Vec::new();
+   |             ^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_global_intensity_points`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `global_sharpness_points`
+  --> src/lib.rs:82:13
+   |
+82 |     let mut global_sharpness_points: Vec<AHAPControlPoint> = Vec::new();
+   |             ^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_global_sharpness_points`
+
+warning: unused variable: `transient_items`
+  --> src/lib.rs:83:13
+   |
+83 |     let mut transient_items: Vec<AHAPPatternItem> = Vec::new();
+   |             ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_transient_items`
+
+warning: variable does not need to be mutable
+  --> src/lib.rs:81:9
+   |
+81 |     let mut global_intensity_points: Vec<AHAPControlPoint> = Vec::new();
+   |         ----^^^^^^^^^^^^^^^^^^^^^^^
+   |         |
+   |         help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+  --> src/lib.rs:82:9
+   |
+82 |     let mut global_sharpness_points: Vec<AHAPControlPoint> = Vec::new();
+   |         ----^^^^^^^^^^^^^^^^^^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> src/lib.rs:83:9
+   |
+83 |     let mut transient_items: Vec<AHAPPatternItem> = Vec::new();
+   |         ----^^^^^^^^^^^^^^^
+   |         |
+   |         help: remove this `mut`
+
+For more information about this error, try `rustc --explain E0255`.
+warning: `haptic-studio-pro` (lib) generated 6 warnings
+error: could not compile `haptic-studio-pro` (lib) due to 1 previous error; 6 warnings emitted

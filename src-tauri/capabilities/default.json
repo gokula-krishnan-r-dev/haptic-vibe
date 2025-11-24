@@ -1,0 +1,21 @@
+{
+    "identifier": "default",
+    "description": "Default permissions for Haptic Studio Pro",
+    "windows": [
+        "main"
+    ],
+    "permissions": [
+        "core:default",
+        "shell:default",
+        "dialog:default",
+        "dialog:allow-save",
+        "dialog:allow-message",
+        "dialog:allow-ask",
+        "dialog:allow-confirm",
+        "fs:default",
+        "fs:allow-read",
+        "fs:allow-write",
+        "fs:allow-create",
+        "fs:allow-remove"
+    ]
+}
