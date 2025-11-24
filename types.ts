@@ -59,4 +59,5 @@ export interface ProjectState {
   playbackRate: number;
   isVideoMuted: boolean;
   isHapticAudioEnabled: boolean;
+  waveform?: number[];
 }

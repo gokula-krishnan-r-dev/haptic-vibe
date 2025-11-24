@@ -10,7 +10,8 @@ import { EditorHapticEvent, ProjectState } from '@/types';
 import { HapticAudioEngine } from '@/utils/audioEngine';
 import * as storage from '@/utils/storage';
 import { invoke } from '@tauri-apps/api/core';
-import { save } from '@tauri-apps/plugin-dialog';
+import { save, open } from '@tauri-apps/plugin-dialog';
+import { readFile } from '@tauri-apps/plugin-fs';
 import { PlayIcon, PauseIcon, BoltIcon, WaveIcon, LoopIcon, ClockIcon, ResetIcon, LoaderIcon, SpeakerWaveIcon, SpeakerXMarkIcon } from '@/components/Icons';
 
 export default function Home() {
@@ -21,6 +22,7 @@ export default function Home() {
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(10);
     const [events, setEvents] = useState<EditorHapticEvent[]>([]);
+    const [waveform, setWaveform] = useState<number[]>([]);
     const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -82,6 +84,13 @@ export default function Home() {
                     setPlaybackRate(projectState.playbackRate || 1);
                     setIsVideoMuted(projectState.isVideoMuted ?? false);
                     setIsHapticAudioEnabled(projectState.isHapticAudioEnabled ?? true);
+                    // We might want to persist waveform too, but for now let's re-analyze or just keep it in memory if possible.
+                    // Actually, since we don't have the file path on reload (unless we store it), we can't re-analyze easily without user interaction or storing the waveform.
+                    // Let's assume for now waveform is lost on reload unless we store it.
+                    // TODO: Add waveform to ProjectState if needed.
+                    if (projectState.waveform) {
+                        setWaveform(projectState.waveform);
+                    }
                 }
             } catch (error) {
                 console.error("Failed to load project:", error);
@@ -108,9 +117,10 @@ export default function Home() {
             playbackRate,
             isVideoMuted,
             isHapticAudioEnabled,
+            waveform, // Save waveform to state
         };
         storage.saveProjectState(projectState);
-    }, [events, duration, isLooping, playbackRate, isVideoMuted, isHapticAudioEnabled, isLoading]);
+    }, [events, duration, isLooping, playbackRate, isVideoMuted, isHapticAudioEnabled, waveform, isLoading]);
 
 
     // --- Keyboard Shortcuts ---
@@ -229,32 +239,56 @@ export default function Home() {
 
     /**
      * Handle video file upload with proper error handling and cleanup
+     * Now uses native dialog and Rust backend for analysis
      */
-    const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        // Validate file type
-        if (!file.type.startsWith('video/')) {
-            alert('Please select a valid video file.');
-            return;
-        }
-
-        setIsLoading(true);
+    const handleVideoImport = async () => {
         try {
+            const selected = await open({
+                multiple: false,
+                filters: [{
+                    name: 'Video',
+                    extensions: ['mp4', 'mov', 'avi', 'mkv']
+                }]
+            });
+
+            if (!selected) return; // User cancelled
+
+            const filePath = selected as string;
+            setIsLoading(true);
+
+            // 1. Analyze Audio in Rust
+            let waveformData: number[] = [];
+            try {
+                waveformData = await invoke('analyze_audio', { filePath });
+                console.log("Audio analysis complete, points:", waveformData.length);
+            } catch (e) {
+                console.error("Audio analysis failed:", e);
+                // Continue without waveform
+            }
+
+            // 2. Read file to Blob for frontend playback
+            const fileBytes = await readFile(filePath);
+            const blob = new Blob([fileBytes], { type: 'video/mp4' }); // Mime type might need better detection but mp4 is safe default for blob url
+
+            // 3. Save to storage
             await storage.clearAllProjectData();
-            await storage.saveVideo(file);
+            await storage.saveVideo(blob);
+
+            // 4. Save initial state with waveform
             storage.saveProjectState({
                 events: [],
-                duration: 10,
+                duration: 10, // Will be updated when video loads
                 isLooping: false,
                 playbackRate: 1,
                 isVideoMuted: false,
                 isHapticAudioEnabled: true,
+                waveform: waveformData
             });
+
             window.location.reload();
+
         } catch (error) {
-            console.error("Failed to save video:", error);
+            console.error("Failed to import video:", error);
             setIsLoading(false);
             alert(`Failed to import video: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
@@ -444,18 +478,12 @@ export default function Home() {
                         New Project
                     </button>
                     <button
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={handleVideoImport}
                         className="text-xs font-medium px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded border border-gray-700 transition-all"
                     >
                         Import Video
                     </button>
-                    <input
-                        type="file"
-                        ref={fileInputRef}
-                        className="hidden"
-                        accept="video/*"
-                        onChange={handleVideoUpload}
-                    />
+                    {/* Hidden input removed as we use native dialog now */}
                     <button
                         onClick={handleExport}
                         disabled={isGenerating || events.length === 0}
@@ -616,6 +644,7 @@ export default function Home() {
                             currentTime={currentTime}
                             duration={duration}
                             events={events}
+                            waveform={waveform}
                             onSeek={handleSeek}
                             onSelectEvent={(id) => {
                                 setSelectedEventId(id);

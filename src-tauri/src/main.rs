@@ -1,8 +1,17 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![allow(non_snake_case)]
 
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Write;
+use std::path::Path;
+use symphonia::core::audio::SampleBuffer;
+use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
+use symphonia::core::errors::Error;
+use symphonia::core::formats::FormatOptions;
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::meta::MetadataOptions;
+use symphonia::core::probe::Hint;
 
 // --- Input Types (from Frontend) ---
 
@@ -79,6 +88,129 @@ pub struct AHAPParameterCurve {
 
 mod commands {
     use super::*;
+
+    #[tauri::command]
+    pub async fn analyze_audio(file_path: String) -> Result<Vec<f32>, String> {
+        println!("Analyzing audio for file: {}", file_path);
+        // 1. Open the media source.
+        let src = File::open(&file_path).map_err(|e| format!("failed to open file: {}", e))?;
+        let mss = MediaSourceStream::new(Box::new(src), Default::default());
+
+        // 2. Create a probe hint using the file's extension.
+        let mut hint = Hint::new();
+        if let Some(ext) = Path::new(&file_path).extension().and_then(|e| e.to_str()) {
+            hint.with_extension(ext);
+        }
+
+        // 3. Probe the media source.
+        let meta_opts: MetadataOptions = Default::default();
+        let fmt_opts: FormatOptions = Default::default();
+        let probed = symphonia::default::get_probe()
+            .format(&hint, mss, &fmt_opts, &meta_opts)
+            .map_err(|e| format!("unsupported format: {}", e))?;
+
+        let mut format = probed.format;
+
+        // 4. Find the first audio track.
+        let track = format
+            .tracks()
+            .iter()
+            .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+            .ok_or("no audio track found")?;
+
+        // 5. Create a decoder for the track.
+        let dec_opts: DecoderOptions = Default::default();
+        let mut decoder = symphonia::default::get_codecs()
+            .make(&track.codec_params, &dec_opts)
+            .map_err(|e| format!("unsupported codec: {}", e))?;
+
+        let track_id = track.id;
+        let mut waveform_data = Vec::new();
+        
+        // Processing parameters
+        // We want roughly 50-100 points per second for visualization
+        // Standard sample rate is usually 44100 or 48000
+        // So we need to aggregate roughly 441-960 samples into one point.
+        // Let's pick a chunk size that gives us good resolution but not too much data.
+        // 1024 samples at 48kHz is ~21ms, which is ~46 points/sec. Good enough.
+        let chunk_size = 1024; 
+        let mut current_chunk_sum = 0.0;
+        let mut current_chunk_count = 0;
+
+        // 6. Decode loop.
+        loop {
+            let packet = match format.next_packet() {
+                Ok(packet) => packet,
+                Err(Error::IoError(_)) => break, // End of stream
+                Err(Error::ResetRequired) => {
+                    // The track list has been changed. Re-examine it and create a new decoder if necessary.
+                    // For simplicity, we'll just break here as we only care about the main audio.
+                    break;
+                }
+                Err(err) => return Err(format!("error decoding: {}", err)),
+            };
+
+            if packet.track_id() != track_id {
+                continue;
+            }
+
+            match decoder.decode(&packet) {
+                Ok(decoded) => {
+                    // Consume the decoded audio samples.
+                    // If the audio buffer is not in f32, it will be converted.
+                    let spec = *decoded.spec();
+                    let duration = decoded.capacity() as u64;
+                    let mut sample_buf = SampleBuffer::<f32>::new(duration, spec);
+                    sample_buf.copy_interleaved_ref(decoded);
+
+                    // The samples are interleaved (L, R, L, R...)
+                    // We want to calculate RMS or Peak for mono visualization.
+                    // We'll average the channels to get mono, then square for RMS.
+                    
+                    let samples = sample_buf.samples();
+                    let channels = spec.channels.count();
+
+                    for frame in samples.chunks(channels) {
+                        let mut mono_sample = 0.0;
+                        for &s in frame {
+                            mono_sample += s;
+                        }
+                        mono_sample /= channels as f32;
+
+                        current_chunk_sum += mono_sample * mono_sample;
+                        current_chunk_count += 1;
+
+                        if current_chunk_count >= chunk_size {
+                            let rms = (current_chunk_sum / current_chunk_count as f32).sqrt();
+                            waveform_data.push(rms);
+                            current_chunk_sum = 0.0;
+                            current_chunk_count = 0;
+                        }
+                    }
+                }
+                Err(Error::IoError(_)) => break,
+                Err(Error::DecodeError(_)) => (), // Ignore decode errors and continue
+                Err(err) => return Err(format!("error decoding packet: {}", err)),
+            }
+        }
+        
+        // Push remaining
+        if current_chunk_count > 0 {
+             let rms = (current_chunk_sum / current_chunk_count as f32).sqrt();
+             waveform_data.push(rms);
+        }
+
+        // Normalize data to 0.0 - 1.0 range for easier frontend rendering
+        let max_val = waveform_data.iter().fold(0.0f32, |a, &b| a.max(b));
+        if max_val > 0.0 {
+            for x in &mut waveform_data {
+                *x /= max_val;
+            }
+        }
+        
+        println!("Analysis complete. Generated {} points.", waveform_data.len());
+        Ok(waveform_data)
+    }
 
     #[tauri::command]
     pub async fn generate_ahap(events: Vec<EditorHapticEvent>, filepath: String) -> Result<(), String> {
@@ -210,7 +342,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![commands::generate_ahap])
+        .invoke_handler(tauri::generate_handler![commands::generate_ahap, commands::analyze_audio])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
