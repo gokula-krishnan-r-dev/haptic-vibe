@@ -112,6 +112,15 @@ export const Timeline: React.FC<TimelineProps> = ({
     startTrackId: number
   } | null>(null);
 
+  // Resize Logic
+  const resizeDragRef = useRef<{
+    id: string,
+    handle: 'left' | 'right',
+    startX: number,
+    startStartTime: number,
+    startDuration: number
+  } | null>(null);
+
   const handleBlockMouseDown = (e: React.MouseEvent, evt: EditorHapticEvent) => {
     e.stopPropagation(); // Prevent seek
     onSelectEvent(evt.id);
@@ -161,6 +170,104 @@ export const Timeline: React.FC<TimelineProps> = ({
 
     const handleMouseUp = () => {
       dragRef.current = null;
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const handleResizeMouseDown = (e: React.MouseEvent, evt: EditorHapticEvent, handle: 'left' | 'right') => {
+    e.stopPropagation(); // Prevent block drag and seek
+    onSelectEvent(evt.id);
+
+    resizeDragRef.current = {
+      id: evt.id,
+      handle,
+      startX: e.clientX,
+      startStartTime: evt.startTime,
+      startDuration: evt.duration
+    };
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!resizeDragRef.current || !containerRef.current) return;
+
+      const diffX = moveEvent.clientX - resizeDragRef.current.startX;
+      const diffTime = diffX / pixelsPerSecond;
+
+      let newStartTime = resizeDragRef.current.startStartTime;
+      let newDuration = resizeDragRef.current.startDuration;
+
+      const MIN_DURATION = 0.1;
+      const snapThreshold = 10 / pixelsPerSecond;
+
+      if (resizeDragRef.current.handle === 'right') {
+        // Resize from right: adjust duration
+        newDuration = Math.max(MIN_DURATION, resizeDragRef.current.startDuration + diffTime);
+
+        // Snap end time to grid
+        const endTime = newStartTime + newDuration;
+        const nearestSecond = Math.round(endTime);
+        if (Math.abs(endTime - nearestSecond) < snapThreshold) {
+          newDuration = nearestSecond - newStartTime;
+        }
+
+        // Snap to other events
+        events.forEach(other => {
+          if (other.id !== evt.id) {
+            const otherEnd = other.startTime + other.duration;
+            if (Math.abs(endTime - other.startTime) < snapThreshold) {
+              newDuration = other.startTime - newStartTime;
+            }
+            if (Math.abs(endTime - otherEnd) < snapThreshold) {
+              newDuration = otherEnd - newStartTime;
+            }
+          }
+        });
+      } else {
+        // Resize from left: adjust startTime and duration to keep end time fixed
+        const originalEndTime = resizeDragRef.current.startStartTime + resizeDragRef.current.startDuration;
+        newStartTime = resizeDragRef.current.startStartTime + diffTime;
+        newStartTime = Math.max(0, newStartTime);
+
+        // Snap start time to grid
+        const nearestSecond = Math.round(newStartTime);
+        if (Math.abs(newStartTime - nearestSecond) < snapThreshold) {
+          newStartTime = nearestSecond;
+        }
+
+        // Snap to other events
+        events.forEach(other => {
+          if (other.id !== evt.id) {
+            const otherEnd = other.startTime + other.duration;
+            if (Math.abs(newStartTime - other.startTime) < snapThreshold) {
+              newStartTime = other.startTime;
+            }
+            if (Math.abs(newStartTime - otherEnd) < snapThreshold) {
+              newStartTime = otherEnd;
+            }
+          }
+        });
+
+        newDuration = originalEndTime - newStartTime;
+
+        // Enforce minimum duration
+        if (newDuration < MIN_DURATION) {
+          newStartTime = originalEndTime - MIN_DURATION;
+          newDuration = MIN_DURATION;
+        }
+      }
+
+      onUpdateEvent({
+        ...evt,
+        startTime: newStartTime,
+        duration: newDuration
+      });
+    };
+
+    const handleMouseUp = () => {
+      resizeDragRef.current = null;
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
@@ -275,11 +382,19 @@ export const Timeline: React.FC<TimelineProps> = ({
                   )}
                 </div>
 
-                {/* Selection Handles (Visual only for now) */}
+                {/* Resize Handles (Interactive) */}
                 {evt.selected && !isTransient && (
                   <>
-                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-white/20 hover:bg-white/50 cursor-w-resize" />
-                    <div className="absolute right-0 top-0 bottom-0 w-1 bg-white/20 hover:bg-white/50 cursor-e-resize" />
+                    <div
+                      className="absolute left-0 top-0 bottom-0 w-1 bg-white/30 hover:bg-white/60 cursor-ew-resize transition-colors z-30"
+                      onMouseDown={(e) => handleResizeMouseDown(e, evt, 'left')}
+                      title="Drag to adjust start time"
+                    />
+                    <div
+                      className="absolute right-0 top-0 bottom-0 w-1 bg-white/30 hover:bg-white/60 cursor-ew-resize transition-colors z-30"
+                      onMouseDown={(e) => handleResizeMouseDown(e, evt, 'right')}
+                      title="Drag to adjust duration"
+                    />
                   </>
                 )}
               </div>
