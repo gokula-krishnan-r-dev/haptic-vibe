@@ -6,6 +6,7 @@ import { Inspector } from '@/components/Inspector';
 import { DeviceSimulator } from '@/components/DeviceSimulator';
 import { ResizablePanel } from '@/components/ResizablePanel';
 import { GenerationLoader } from '@/components/GenerationLoader';
+import { ImportModal } from '@/components/ImportModal';
 import { EditorHapticEvent, ProjectState, HistoryActionType } from '@/types';
 import { HapticAudioEngine } from '@/utils/audioEngine';
 import * as storage from '@/utils/storage';
@@ -18,6 +19,7 @@ import { HistoryManager } from '@/utils/historyManager';
 export default function Home() {
     const [isLoading, setIsLoading] = useState(true);
     const [isGenerating, setIsGenerating] = useState(false);
+    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
     const [videoSrc, setVideoSrc] = useState<string | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
@@ -604,6 +606,12 @@ export default function Home() {
                     >
                         Import Video
                     </button>
+                    <button
+                        onClick={() => setIsImportModalOpen(true)}
+                        className="text-xs font-medium px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded border border-gray-700 transition-all"
+                    >
+                        Import .AHAP
+                    </button>
                     {/* Hidden input removed as we use native dialog now */}
                     <button
                         onClick={handleExport}
@@ -803,6 +811,46 @@ export default function Home() {
                 </div>
 
             </div>
+
+            <ImportModal
+                isOpen={isImportModalOpen}
+                onClose={() => setIsImportModalOpen(false)}
+                onImport={async (newEvents) => {
+                    const oldState = getCurrentState();
+                    // Append or replace? Usually import replaces or appends.
+                    // Let's ask user? Or just append?
+                    // The user said "populate the timeline track".
+                    // Usually import implies loading a project.
+                    // But if I want to "reverse-engineer", maybe I want to see it.
+                    // Let's replace for now, as it's a "Pattern" import.
+                    // Or maybe append if the user wants to combine?
+                    // Given the "Import Video" clears data, "Import AHAP" might also be expected to clear or at least be significant.
+                    // But let's be safe and just set events.
+                    // Wait, if I replace, I lose existing work.
+                    // I'll replace for now but maybe I should prompt?
+                    // Actually, let's just replace the events list.
+
+                    if (events.length > 0) {
+                        if (!window.confirm("Importing will replace existing events. Continue?")) {
+                            return;
+                        }
+                    }
+
+                    setEvents(newEvents);
+                    setSelectedEventId(null);
+
+                    // Track history
+                    const newState = { ...oldState, events: newEvents };
+                    await trackHistoryAction(
+                        HistoryActionType.UpdateEvent, // Using UpdateEvent as a generic "bulk update" for now or add Import action
+                        'Imported AHAP Pattern',
+                        newState
+                    );
+
+                    setSuccessMessage(`✓ Imported ${newEvents.length} events`);
+                    setTimeout(() => setSuccessMessage(null), 3000);
+                }}
+            />
         </div>
     );
 }

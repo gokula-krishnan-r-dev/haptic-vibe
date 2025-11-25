@@ -18,7 +18,7 @@ mod history;
 
 // --- Input Types (from Frontend) ---
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct EditorHapticEvent {
     pub id: String,
     pub trackId: u32,
@@ -40,29 +40,33 @@ pub struct AHAPControlPoint {
 
 // --- Output Types (AHAP Format) ---
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AHAPPattern {
-    pub Version: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub Version: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub Metadata: Option<AHAPMetadata>,
     pub Pattern: Vec<AHAPPatternItem>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AHAPMetadata {
-    pub Project: String,
-    pub Created: String,
-    pub Description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub Project: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub Created: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub Description: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum AHAPPatternItem {
     Event { Event: AHAPEvent },
     ParameterCurve { ParameterCurve: AHAPParameterCurve },
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AHAPEvent {
     pub EventType: String,
     pub Time: f64,
@@ -74,13 +78,13 @@ pub struct AHAPEvent {
     pub Name: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AHAPEventParameter {
     pub ParameterID: String,
     pub ParameterValue: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AHAPParameterCurve {
     pub ParameterID: String,
     pub Time: f64,
@@ -316,7 +320,7 @@ mod commands {
         }
 
         let ahap = AHAPPattern {
-            Version: 1.0,
+            Version: Some(1.0),
             Metadata: None, // Explicitly removed as per request
             Pattern: final_pattern,
         };
@@ -337,6 +341,101 @@ mod commands {
             .map_err(|e| format!("Failed to write data to file '{}': {}", filepath, e))?;
 
         Ok(())
+    }
+
+    #[tauri::command]
+    pub async fn import_ahap(json_content: String) -> Result<Vec<EditorHapticEvent>, String> {
+        // 1. Parse JSON
+        let ahap: AHAPPattern = serde_json::from_str(&json_content)
+            .map_err(|e| format!("Invalid AHAP JSON: {}", e))?;
+
+        let mut events: Vec<EditorHapticEvent> = Vec::new();
+        let mut track_counter = 0;
+
+        // Helper to get next track ID (0-3)
+        let mut next_track_id = || {
+            let id = track_counter;
+            track_counter = (track_counter + 1) % 4;
+            id
+        };
+
+        for item in ahap.Pattern {
+            match item {
+                AHAPPatternItem::Event { Event: event } => {
+                    let duration = event.EventDuration.unwrap_or(0.0);
+                    let is_continuous = event.EventType == "HapticContinuous";
+                    let event_type = if is_continuous { "Continuous" } else { "Transient" };
+                    
+                    let mut intensity = 1.0; // Default
+                    let mut sharpness = 0.5; // Default
+
+                    if let Some(params) = event.EventParameters {
+                        for param in params {
+                            if param.ParameterID == "HapticIntensity" {
+                                intensity = param.ParameterValue;
+                            } else if param.ParameterID == "HapticSharpness" {
+                                sharpness = param.ParameterValue;
+                            }
+                        }
+                    }
+
+                    // Create basic event
+                    let editor_event = EditorHapticEvent {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        trackId: next_track_id(),
+                        event_type: event_type.to_string(),
+                        startTime: event.Time,
+                        duration: if is_continuous && duration == 0.0 { 0.1 } else { duration },
+                        intensity,
+                        sharpness,
+                        intensityCurve: Vec::new(),
+                        sharpnessCurve: Vec::new(),
+                    };
+                    
+                    events.push(editor_event);
+                },
+                AHAPPatternItem::ParameterCurve { ParameterCurve: curve } => {
+                    let curve_type = if curve.ParameterID == "HapticIntensityControl" {
+                        "Intensity"
+                    } else if curve.ParameterID == "HapticSharpnessControl" {
+                        "Sharpness"
+                    } else {
+                        continue;
+                    };
+
+                    for point in curve.ParameterCurveControlPoints {
+                        let point_time = curve.Time + point.Time; // Global time
+                        
+                        // Find event that contains this time
+                        if let Some(event) = events.iter_mut().find(|e| {
+                            e.event_type == "Continuous" && 
+                            point_time >= e.startTime && 
+                            point_time <= (e.startTime + e.duration)
+                        }) {
+                            let relative_time = point_time - event.startTime;
+                            let control_point = AHAPControlPoint {
+                                Time: relative_time,
+                                ParameterValue: point.ParameterValue,
+                            };
+                            
+                            if curve_type == "Intensity" {
+                                event.intensityCurve.push(control_point);
+                            } else {
+                                event.sharpnessCurve.push(control_point);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sort curves
+        for event in &mut events {
+            event.intensityCurve.sort_by(|a, b| a.Time.partial_cmp(&b.Time).unwrap_or(std::cmp::Ordering::Equal));
+            event.sharpnessCurve.sort_by(|a, b| a.Time.partial_cmp(&b.Time).unwrap_or(std::cmp::Ordering::Equal));
+        }
+
+        Ok(events)
     }
 
     // ========================================================================
@@ -453,6 +552,7 @@ fn main() {
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
             commands::generate_ahap,
+            commands::import_ahap,
             commands::analyze_audio,
             commands::push_history,
             commands::undo,
