@@ -13,6 +13,9 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
+// --- History Module ---
+mod history;
+
 // --- Input Types (from Frontend) ---
 
 #[derive(Debug, Deserialize)]
@@ -335,6 +338,112 @@ mod commands {
 
         Ok(())
     }
+
+    // ========================================================================
+    // HISTORY COMMANDS
+    // ========================================================================
+
+    #[tauri::command]
+    pub async fn push_history(
+        action: history::HistoryActionType,
+        label: String,
+        details: Option<String>,
+        new_state: serde_json::Value,
+    ) -> Result<history::HistoryEntry, String> {
+        let mut hist = history::HISTORY.lock().map_err(|e| e.to_string())?;
+        hist.push_action(action, label, details, new_state)
+    }
+
+    #[tauri::command]
+    pub async fn undo() -> Result<serde_json::Value, String> {
+        let mut hist = history::HISTORY.lock().map_err(|e| e.to_string())?;
+        hist.undo()
+    }
+
+    #[tauri::command]
+    pub async fn redo() -> Result<serde_json::Value, String> {
+        let mut hist = history::HISTORY.lock().map_err(|e| e.to_string())?;
+        hist.redo()
+    }
+
+    #[tauri::command]
+    pub async fn get_history_list(filter: Option<history::HistoryFilter>) -> Result<Vec<history::HistoryEntry>, String> {
+        let hist = history::HISTORY.lock().map_err(|e| e.to_string())?;
+        Ok(hist.get_history_list(filter))
+    }
+
+    #[tauri::command]
+    pub async fn jump_to_history(index: isize) -> Result<serde_json::Value, String> {
+        let mut hist = history::HISTORY.lock().map_err(|e| e.to_string())?;
+        hist.jump_to_index(index)
+    }
+
+    #[tauri::command]
+    pub async fn delete_history_entry(id: String) -> Result<(), String> {
+        let mut hist = history::HISTORY.lock().map_err(|e| e.to_string())?;
+        hist.delete_entry(&id)
+    }
+
+    #[tauri::command]
+    pub async fn pin_history_entry(id: String, pinned: bool) -> Result<(), String> {
+        let mut hist = history::HISTORY.lock().map_err(|e| e.to_string())?;
+        hist.pin_entry(&id, pinned)
+    }
+
+    #[tauri::command]
+    pub async fn create_snapshot(label: String, notes: Option<String>) -> Result<history::Snapshot, String> {
+        let mut hist = history::HISTORY.lock().map_err(|e| e.to_string())?;
+        hist.create_snapshot(label, notes)
+    }
+
+    #[tauri::command]
+    pub async fn restore_snapshot(id: String) -> Result<serde_json::Value, String> {
+        let mut hist = history::HISTORY.lock().map_err(|e| e.to_string())?;
+        hist.restore_snapshot(&id)
+    }
+
+    #[tauri::command]
+    pub async fn get_snapshots() -> Result<Vec<history::Snapshot>, String> {
+        let hist = history::HISTORY.lock().map_err(|e| e.to_string())?;
+        Ok(hist.get_snapshots())
+    }
+
+    #[tauri::command]
+    pub async fn delete_snapshot(id: String) -> Result<(), String> {
+        let mut hist = history::HISTORY.lock().map_err(|e| e.to_string())?;
+        hist.delete_snapshot(&id)
+    }
+
+    #[tauri::command]
+    pub async fn clear_old_history(keep_count: usize) -> Result<(), String> {
+        let mut hist = history::HISTORY.lock().map_err(|e| e.to_string())?;
+        hist.clear_old_history(keep_count)
+    }
+
+    #[tauri::command]
+    pub async fn can_undo() -> Result<bool, String> {
+        let hist = history::HISTORY.lock().map_err(|e| e.to_string())?;
+        Ok(hist.can_undo())
+    }
+
+    #[tauri::command]
+    pub async fn can_redo() -> Result<bool, String> {
+        let hist = history::HISTORY.lock().map_err(|e| e.to_string())?;
+        Ok(hist.can_redo())
+    }
+
+    #[tauri::command]
+    pub async fn get_history_position() -> Result<(isize, usize), String> {
+        let hist = history::HISTORY.lock().map_err(|e| e.to_string())?;
+        Ok((hist.get_current_index(), hist.get_history_list(None).len()))
+    }
+
+    #[tauri::command]
+    pub async fn set_current_state(state: serde_json::Value) -> Result<(), String> {
+        let mut hist = history::HISTORY.lock().map_err(|e| e.to_string())?;
+        hist.set_current_state(state);
+        Ok(())
+    }
 }
 
 fn main() {
@@ -342,7 +451,26 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![commands::generate_ahap, commands::analyze_audio])
+        .invoke_handler(tauri::generate_handler![
+            commands::generate_ahap,
+            commands::analyze_audio,
+            commands::push_history,
+            commands::undo,
+            commands::redo,
+            commands::get_history_list,
+            commands::jump_to_history,
+            commands::delete_history_entry,
+            commands::pin_history_entry,
+            commands::create_snapshot,
+            commands::restore_snapshot,
+            commands::get_snapshots,
+            commands::delete_snapshot,
+            commands::clear_old_history,
+            commands::can_undo,
+            commands::can_redo,
+            commands::get_history_position,
+            commands::set_current_state,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

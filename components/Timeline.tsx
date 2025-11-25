@@ -1,6 +1,8 @@
 
 import React, { useRef, useState, useEffect } from 'react';
 import { EditorHapticEvent } from '../types';
+import { HistoryToolbar } from './HistoryToolbar';
+import { useHistory } from '../hooks/useHistory';
 
 interface TimelineProps {
   currentTime: number;
@@ -10,6 +12,8 @@ interface TimelineProps {
   onSeek: (time: number) => void;
   onSelectEvent: (id: string | null) => void;
   onUpdateEvent: (event: EditorHapticEvent) => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
 }
 
 const TRACK_HEIGHT = 60;
@@ -23,8 +27,11 @@ export const Timeline: React.FC<TimelineProps> = ({
   waveform,
   onSeek,
   onSelectEvent,
-  onUpdateEvent
+  onUpdateEvent,
+  onUndo,
+  onRedo
 }) => {
+  const { canUndo, canRedo, historyList } = useHistory();
   const containerRef = useRef<HTMLDivElement>(null);
   const [pixelsPerSecond, setPixelsPerSecond] = useState(100);
   const totalWidth = Math.max(duration * pixelsPerSecond, 800);
@@ -284,7 +291,20 @@ export const Timeline: React.FC<TimelineProps> = ({
           <span className="text-xs font-bold uppercase tracking-wider">Timeline</span>
           <span className="text-[10px] bg-gray-800 px-1.5 rounded"> {events.length} Events </span>
         </div>
-        <div className="flex items-center gap-2">
+
+        {/* History Toolbar */}
+        <div className="flex items-center gap-3">
+          <HistoryToolbar
+            canUndo={canUndo}
+            canRedo={canRedo}
+            onUndo={() => onUndo?.()}
+            onRedo={() => onRedo?.()}
+            lastAction={historyList[historyList.length - 1]?.label}
+            nextAction={historyList[historyList.length]?.label}
+          />
+
+          <div className="h-6 w-px bg-gray-700" />
+
           <span className="text-[10px] text-gray-600 mr-2">Hold Shift to Scroll • Click & Drag to Move</span>
           <button onClick={() => setPixelsPerSecond(p => Math.max(20, p * 0.8))} className="text-xs px-2 py-0.5 bg-gray-800 rounded hover:bg-gray-700 text-gray-300">-</button>
           <button onClick={() => setPixelsPerSecond(p => Math.min(500, p * 1.2))} className="text-xs px-2 py-0.5 bg-gray-800 rounded hover:bg-gray-700 text-gray-300">+</button>

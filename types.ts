@@ -61,3 +61,47 @@ export interface ProjectState {
   isHapticAudioEnabled: boolean;
   waveform?: number[];
 }
+
+// ============================================================================
+// HISTORY SYSTEM TYPES
+// ============================================================================
+
+// History Action Types
+export enum HistoryActionType {
+  AddEvent = 'AddEvent',
+  DeleteEvent = 'DeleteEvent',
+  UpdateEvent = 'UpdateEvent',
+  BatchOperation = 'BatchOperation',
+  UpdateGlobalSettings = 'UpdateGlobalSettings'
+}
+
+// History Entry
+export interface HistoryEntry {
+  id: string;
+  timestamp: number; // Unix timestamp in milliseconds
+  action: HistoryActionType;
+  label: string; // Human-readable description
+  details?: string; // Additional context
+  is_pinned: boolean;
+  is_collapsed: boolean; // For grouped operations
+  child_count?: number; // Number of sub-operations if collapsed
+  forward_diff: any; // JSON diff data
+  backward_diff: any; // JSON diff data
+}
+
+// Snapshot
+export interface Snapshot {
+  id: string;
+  timestamp: number;
+  label: string;
+  notes?: string;
+  state: any; // Full project state as JSON
+}
+
+// History Filter
+export interface HistoryFilter {
+  action_types?: HistoryActionType[];
+  search_query?: string;
+  date_range?: [number, number];
+  pinned_only?: boolean;
+}

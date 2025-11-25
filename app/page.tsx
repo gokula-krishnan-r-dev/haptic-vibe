@@ -6,13 +6,14 @@ import { Inspector } from '@/components/Inspector';
 import { DeviceSimulator } from '@/components/DeviceSimulator';
 import { ResizablePanel } from '@/components/ResizablePanel';
 import { GenerationLoader } from '@/components/GenerationLoader';
-import { EditorHapticEvent, ProjectState } from '@/types';
+import { EditorHapticEvent, ProjectState, HistoryActionType } from '@/types';
 import { HapticAudioEngine } from '@/utils/audioEngine';
 import * as storage from '@/utils/storage';
 import { invoke } from '@tauri-apps/api/core';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { PlayIcon, PauseIcon, BoltIcon, WaveIcon, LoopIcon, ClockIcon, ResetIcon, LoaderIcon, SpeakerWaveIcon, SpeakerXMarkIcon } from '@/components/Icons';
+import { HistoryManager } from '@/utils/historyManager';
 
 export default function Home() {
     const [isLoading, setIsLoading] = useState(true);
@@ -39,6 +40,35 @@ export default function Home() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const lastFrameTimeRef = useRef<number>(0);
 
+    // History tracking flag to prevent recursive tracking
+    const isRestoringRef = useRef(false);
+
+    // Helper to get current project state
+    const getCurrentState = useCallback((): ProjectState => ({
+        events,
+        duration,
+        isLooping,
+        playbackRate,
+        isVideoMuted,
+        isHapticAudioEnabled,
+        waveform
+    }), [events, duration, isLooping, playbackRate, isVideoMuted, isHapticAudioEnabled, waveform]);
+
+    // Track action in history
+    const trackHistoryAction = useCallback(async (
+        action: HistoryActionType,
+        label: string,
+        newState: ProjectState,
+        details?: string
+    ) => {
+        if (isRestoringRef.current) return; // Don't track during undo/redo
+        try {
+            await HistoryManager.pushAction(action, label, newState, details);
+        } catch (error) {
+            console.error('Failed to track history:', error);
+        }
+    }, []);
+
     // --- Handlers defined before effects that use them ---
     const handlePlayPause = useCallback(() => {
         audioEngine.init();
@@ -55,10 +85,22 @@ export default function Home() {
         }
     }, [audioEngine]);
 
-    const deleteEvent = useCallback((id: string) => {
+    const deleteEvent = useCallback(async (id: string) => {
+        const eventToDelete = events.find(e => e.id === id);
+        if (!eventToDelete) return;
+
+        const oldState = getCurrentState();
         setEvents(prevEvents => prevEvents.filter(e => e.id !== id));
         if (selectedEventId === id) setSelectedEventId(null);
-    }, [selectedEventId]);
+
+        // Track in history
+        const newState = { ...oldState, events: events.filter(e => e.id !== id) };
+        await trackHistoryAction(
+            HistoryActionType.DeleteEvent,
+            `Deleted ${eventToDelete.type} event`,
+            newState
+        );
+    }, [selectedEventId, events, getCurrentState, trackHistoryAction]);
 
     const handleSeek = useCallback((time: number) => {
         setCurrentTime(time);
@@ -66,6 +108,49 @@ export default function Home() {
             videoRef.current.currentTime = time;
         }
     }, []);
+
+    // Undo/Redo handlers
+    const handleUndo = useCallback(async () => {
+        try {
+            isRestoringRef.current = true;
+            const restoredState = await HistoryManager.undo();
+
+            // Restore all state from history
+            setEvents(restoredState.events || []);
+            setDuration(restoredState.duration || duration);
+            setIsLooping(restoredState.isLooping ?? isLooping);
+            setPlaybackRate(restoredState.playbackRate || playbackRate);
+            setIsVideoMuted(restoredState.isVideoMuted ?? isVideoMuted);
+            setIsHapticAudioEnabled(restoredState.isHapticAudioEnabled ?? isHapticAudioEnabled);
+            if (restoredState.waveform) setWaveform(restoredState.waveform);
+
+            isRestoringRef.current = false;
+        } catch (error) {
+            console.error('Undo failed:', error);
+            isRestoringRef.current = false;
+        }
+    }, [duration, isLooping, playbackRate, isVideoMuted, isHapticAudioEnabled]);
+
+    const handleRedo = useCallback(async () => {
+        try {
+            isRestoringRef.current = true;
+            const restoredState = await HistoryManager.redo();
+
+            // Restore all state from history
+            setEvents(restoredState.events || []);
+            setDuration(restoredState.duration || duration);
+            setIsLooping(restoredState.isLooping ?? isLooping);
+            setPlaybackRate(restoredState.playbackRate || playbackRate);
+            setIsVideoMuted(restoredState.isVideoMuted ?? isVideoMuted);
+            setIsHapticAudioEnabled(restoredState.isHapticAudioEnabled ?? isHapticAudioEnabled);
+            if (restoredState.waveform) setWaveform(restoredState.waveform);
+
+            isRestoringRef.current = false;
+        } catch (error) {
+            console.error('Redo failed:', error);
+            isRestoringRef.current = false;
+        }
+    }, [duration, isLooping, playbackRate, isVideoMuted, isHapticAudioEnabled]);
 
     // --- Project Loading & Saving ---
     useEffect(() => {
@@ -91,6 +176,9 @@ export default function Home() {
                     if (projectState.waveform) {
                         setWaveform(projectState.waveform);
                     }
+
+                    // Initialize history with current state
+                    await HistoryManager.setCurrentState(projectState);
                 }
             } catch (error) {
                 console.error("Failed to load project:", error);
@@ -305,7 +393,7 @@ export default function Home() {
         return lastEvent ? (lastEvent.trackId + 1) % 4 : 0;
     };
 
-    const addEvent = (type: 'Transient' | 'Continuous', preset?: string) => {
+    const addEvent = async (type: 'Transient' | 'Continuous', preset?: string) => {
         let intensityCurve: any[] = [];
         let sharpnessCurve: any[] = [];
         let durationVal = type === 'Continuous' ? 1.0 : 0;
@@ -382,13 +470,46 @@ export default function Home() {
             sharpnessCurve
         };
 
+        const oldState = getCurrentState();
         const updatedEvents = events.map(e => ({ ...e, selected: false }));
         setEvents([...updatedEvents, newEvent]);
         setSelectedEventId(newEvent.id);
+
+        // Track in history
+        const newState = { ...oldState, events: [...updatedEvents, newEvent] };
+        await trackHistoryAction(
+            HistoryActionType.AddEvent,
+            `Added ${type} event`,
+            newState
+        );
     };
 
-    const updateEvent = (updated: EditorHapticEvent) => {
+    const updateEvent = async (updated: EditorHapticEvent) => {
+        const oldEvent = events.find(e => e.id === updated.id);
+        if (!oldEvent) return;
+
+        const oldState = getCurrentState();
         setEvents(events.map(e => e.id === updated.id ? updated : e));
+
+        // Detect what changed for better history labels
+        let label = 'Updated event';
+        if (oldEvent.intensity !== updated.intensity) {
+            label = `Intensity: ${oldEvent.intensity.toFixed(2)} → ${updated.intensity.toFixed(2)}`;
+        } else if (oldEvent.sharpness !== updated.sharpness) {
+            label = `Sharpness: ${oldEvent.sharpness.toFixed(2)} → ${updated.sharpness.toFixed(2)}`;
+        } else if (oldEvent.startTime !== updated.startTime) {
+            label = `Start time: ${oldEvent.startTime.toFixed(2)}s → ${updated.startTime.toFixed(2)}s`;
+        } else if (oldEvent.duration !== updated.duration) {
+            label = `Duration: ${oldEvent.duration.toFixed(2)}s → ${updated.duration.toFixed(2)}s`;
+        }
+
+        // Track in history
+        const newState = { ...oldState, events: events.map(e => e.id === updated.id ? updated : e) };
+        await trackHistoryAction(
+            HistoryActionType.UpdateEvent,
+            label,
+            newState
+        );
     };
 
     /**
@@ -651,6 +772,8 @@ export default function Home() {
                                 setEvents(prev => prev.map(e => ({ ...e, selected: e.id === id })));
                             }}
                             onUpdateEvent={updateEvent}
+                            onUndo={handleUndo}
+                            onRedo={handleRedo}
                         />
                     </div>
                 </div>
