@@ -15,6 +15,7 @@ import { save, open } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { PlayIcon, PauseIcon, BoltIcon, WaveIcon, LoopIcon, ClockIcon, ResetIcon, LoaderIcon, SpeakerWaveIcon, SpeakerXMarkIcon } from '@/components/Icons';
 import { HistoryManager } from '@/utils/historyManager';
+import { RealTimePreview } from '@/components/RealTimePreview';
 
 export default function Home() {
     const [isLoading, setIsLoading] = useState(true);
@@ -33,6 +34,7 @@ export default function Home() {
     const [isLooping, setIsLooping] = useState(false);
     const [isVideoMuted, setIsVideoMuted] = useState(false);
     const [isHapticAudioEnabled, setIsHapticAudioEnabled] = useState(true);
+    const [videoPath, setVideoPath] = useState<string | null>(null);
 
     // Initialize Audio Engine
     const [audioEngine] = useState(() => new HapticAudioEngine());
@@ -53,8 +55,9 @@ export default function Home() {
         playbackRate,
         isVideoMuted,
         isHapticAudioEnabled,
-        waveform
-    }), [events, duration, isLooping, playbackRate, isVideoMuted, isHapticAudioEnabled, waveform]);
+        waveform,
+        videoPath: videoPath || undefined
+    }), [events, duration, isLooping, playbackRate, isVideoMuted, isHapticAudioEnabled, waveform, videoPath]);
 
     // Track action in history
     const trackHistoryAction = useCallback(async (
@@ -163,20 +166,31 @@ export default function Home() {
                     setVideoSrc(videoUrl);
                 }
 
-                const projectState = storage.loadProjectState();
-                if (projectState) {
-                    setEvents(projectState.events || []);
-                    setDuration(projectState.duration || 10);
-                    setIsLooping(projectState.isLooping || false);
-                    setPlaybackRate(projectState.playbackRate || 1);
-                    setIsVideoMuted(projectState.isVideoMuted ?? false);
-                    setIsHapticAudioEnabled(projectState.isHapticAudioEnabled ?? true);
-                    // We might want to persist waveform too, but for now let's re-analyze or just keep it in memory if possible.
-                    // Actually, since we don't have the file path on reload (unless we store it), we can't re-analyze easily without user interaction or storing the waveform.
-                    // Let's assume for now waveform is lost on reload unless we store it.
-                    // TODO: Add waveform to ProjectState if needed.
-                    if (projectState.waveform) {
-                        setWaveform(projectState.waveform);
+                const savedState = storage.loadProjectState();
+                if (savedState) {
+                    setEvents(savedState.events || []);
+                    setDuration(savedState.duration || 10);
+                    setIsLooping(savedState.isLooping || false);
+                    setPlaybackRate(savedState.playbackRate || 1);
+                    setIsVideoMuted(savedState.isVideoMuted ?? false);
+                    setIsHapticAudioEnabled(savedState.isHapticAudioEnabled ?? true);
+                    // Initialize history with current state
+                    HistoryManager.setCurrentState({
+                        events: savedState.events || [],
+                        duration: savedState.duration || 10,
+                        isLooping: savedState.isLooping || false,
+                        playbackRate: savedState.playbackRate || 1,
+                        isVideoMuted: savedState.isVideoMuted ?? false,
+                        isHapticAudioEnabled: savedState.isHapticAudioEnabled ?? true
+                    });
+                    if (savedState.waveform) {
+                        setWaveform(savedState.waveform);
+                    }
+                    // Restore video path to backend for Real-Time Preview
+                    if (savedState.videoPath) {
+                        setVideoPath(savedState.videoPath);
+                        invoke('set_preview_video_path', { path: savedState.videoPath })
+                            .catch(e => console.error("Failed to restore preview video path:", e));
                     }
 
                     // Initialize history with current state
@@ -208,9 +222,10 @@ export default function Home() {
             isVideoMuted,
             isHapticAudioEnabled,
             waveform, // Save waveform to state
+            videoPath: videoPath || undefined
         };
         storage.saveProjectState(projectState);
-    }, [events, duration, isLooping, playbackRate, isVideoMuted, isHapticAudioEnabled, waveform, isLoading]);
+    }, [events, duration, isLooping, playbackRate, isVideoMuted, isHapticAudioEnabled, waveform, videoPath, isLoading]);
 
 
     // --- Keyboard Shortcuts ---
@@ -364,7 +379,14 @@ export default function Home() {
             await storage.clearAllProjectData();
             await storage.saveVideo(blob);
 
-            // 4. Save initial state with waveform
+            // 4. Sync video path to backend for Real-Time Preview
+            try {
+                await invoke('set_preview_video_path', { path: filePath });
+            } catch (e) {
+                console.error("Failed to set preview video path:", e);
+            }
+
+            // 5. Save initial state with waveform and video path
             storage.saveProjectState({
                 events: [],
                 duration: 10, // Will be updated when video loads
@@ -372,7 +394,8 @@ export default function Home() {
                 playbackRate: 1,
                 isVideoMuted: false,
                 isHapticAudioEnabled: true,
-                waveform: waveformData
+                waveform: waveformData,
+                videoPath: filePath
             });
 
             window.location.reload();
@@ -594,6 +617,8 @@ export default function Home() {
                 </div>
 
                 <div className="flex items-center gap-3">
+                    <RealTimePreview events={events} />
+                    <div className="h-8 w-px bg-gray-700 mx-1"></div>
                     <button
                         onClick={handleNewProject}
                         className="text-xs font-medium px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded border border-gray-700 transition-all"

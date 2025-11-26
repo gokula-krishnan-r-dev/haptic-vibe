@@ -15,6 +15,7 @@ use symphonia::core::probe::Hint;
 
 // --- History Module ---
 mod history;
+mod server;
 
 // --- Input Types (from Frontend) ---
 
@@ -219,19 +220,8 @@ mod commands {
         Ok(waveform_data)
     }
 
-    #[tauri::command]
-    pub async fn generate_ahap(events: Vec<EditorHapticEvent>, filepath: String) -> Result<(), String> {
-        // Validate input
-        if events.is_empty() {
-            return Err("No haptic events provided. Please add at least one event to the timeline.".to_string());
-        }
-
-        if filepath.is_empty() {
-            return Err("Invalid file path provided.".to_string());
-        }
-
+    fn events_to_ahap(events: &[EditorHapticEvent]) -> Result<AHAPPattern, String> {
         // Merge Strategy: Combine all continuous events into single global curves.
-        
         let mut global_intensity_points: Vec<AHAPControlPoint> = Vec::new();
         let mut global_sharpness_points: Vec<AHAPControlPoint> = Vec::new();
         let mut transient_items: Vec<AHAPPatternItem> = Vec::new();
@@ -241,7 +231,7 @@ mod commands {
                 let ahap_event = AHAPEvent {
                     EventType: "HapticTransient".to_string(),
                     Time: event.startTime,
-                    EventDuration: Some(0.0), // Transients have 0 duration per AHAP spec
+                    EventDuration: Some(0.0),
                     EventParameters: Some(vec![
                         AHAPEventParameter {
                             ParameterID: "HapticIntensity".to_string(),
@@ -314,26 +304,35 @@ mod commands {
         // Add transients
         final_pattern.extend(transient_items);
 
-        // Validate that we have at least some pattern data
         if final_pattern.is_empty() {
-            return Err("No valid haptic pattern data generated. Please check your events.".to_string());
+            return Err("No valid haptic pattern data generated.".to_string());
         }
 
-        let ahap = AHAPPattern {
+        Ok(AHAPPattern {
             Version: Some(1.0),
-            Metadata: None, // Explicitly removed as per request
+            Metadata: None,
             Pattern: final_pattern,
-        };
+        })
+    }
 
-        // Serialize to JSON with validation
+    #[tauri::command]
+    pub async fn generate_ahap(events: Vec<EditorHapticEvent>, filepath: String) -> Result<(), String> {
+        if events.is_empty() {
+            return Err("No haptic events provided.".to_string());
+        }
+        if filepath.is_empty() {
+            return Err("Invalid file path provided.".to_string());
+        }
+
+        let ahap = events_to_ahap(&events)?;
+
         let json = serde_json::to_string_pretty(&ahap)
-            .map_err(|e| format!("Failed to serialize AHAP data to JSON: {}", e))?;
+            .map_err(|e| format!("Failed to serialize AHAP: {}", e))?;
         
-        // Validate JSON structure by parsing it back
+        // Validate JSON structure
         serde_json::from_str::<serde_json::Value>(&json)
-            .map_err(|e| format!("Generated invalid JSON structure: {}", e))?;
+            .map_err(|e| format!("Generated invalid JSON: {}", e))?;
 
-        // Write to file
         let mut file = File::create(&filepath)
             .map_err(|e| format!("Failed to create file '{}': {}", filepath, e))?;
         
@@ -543,9 +542,39 @@ mod commands {
         hist.set_current_state(state);
         Ok(())
     }
+    #[tauri::command]
+    pub async fn get_local_ip() -> Result<String, String> {
+        local_ip_address::local_ip()
+            .map(|ip| ip.to_string())
+            .map_err(|e| format!("Failed to get local IP: {}", e))
+    }
+
+    #[tauri::command]
+    pub async fn broadcast_preview(events: Vec<EditorHapticEvent>) -> Result<(), String> {
+        let ahap = events_to_ahap(&events)?;
+        let json = serde_json::to_string(&ahap)
+            .map_err(|e| format!("Failed to serialize AHAP: {}", e))?;
+        crate::server::broadcast_message(json);
+        Ok(())
+    }
+
+    #[tauri::command]
+    pub async fn set_preview_video_path(path: Option<String>) -> Result<(), String> {
+        crate::server::set_video_path(path);
+        Ok(())
+    }
+
+    #[tauri::command]
+    pub async fn get_connected_clients() -> Result<Vec<String>, String> {
+        Ok(crate::server::get_connected_clients())
+    }
 }
 
 fn main() {
+    tauri::async_runtime::spawn(async {
+        server::start_server().await;
+    });
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -570,6 +599,10 @@ fn main() {
             commands::can_redo,
             commands::get_history_position,
             commands::set_current_state,
+            commands::get_local_ip,
+            commands::broadcast_preview,
+            commands::set_preview_video_path,
+            commands::get_connected_clients,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

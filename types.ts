@@ -60,6 +60,7 @@ export interface ProjectState {
   isVideoMuted: boolean;
   isHapticAudioEnabled: boolean;
   waveform?: number[];
+  videoPath?: string;
 }
 
 // ============================================================================
